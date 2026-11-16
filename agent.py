@@ -75,6 +75,15 @@ class Stock:
     dividend_yield: float | None = None
     buyback_yield: float | None = None
     fetched_at: str = ""
+    analyst_target: float | None = None
+    analyst_count: int | None = None
+    target_source: str = ""
+    price_status: str = "unverified"
+    price_date: str = ""
+    price_flags: str = ""
+    current_ratio: float | None = None
+    debt_to_equity: float | None = None
+    interest_coverage: float | None = None
 
 
 @dataclass
@@ -94,6 +103,79 @@ class Evaluation:
     reverse_dcf: str
     dispersion_pct: float
     fetched_at: str
+    analyst_target: float | None = None
+    analyst_upside_pct: float | None = None
+    analyst_count: int | None = None
+    target_source: str = ""
+    confidence: str = "Review only"
+    model_warning: str = ""
+    financial_health: str = "Unknown"
+    health_flags: str = ""
+    price_status: str = "unverified"
+    price_date: str = ""
+    price_flags: str = ""
+
+
+def price_check(quote_price: float, history: Any, now: datetime | None = None) -> tuple[str, str, str]:
+    """Validate raw close vs quote and inspect stock-split events without adjusting data silently."""
+    now = now or datetime.now(timezone.utc)
+    if history is None or getattr(history, "empty", True):
+        return "unverified", "", "Missing recent price history"
+    try:
+        valid = history["Close"].dropna()
+        if valid.empty:
+            return "unverified", "", "Missing closing price"
+        dt = valid.index[-1].to_pydatetime()
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        close = float(valid.iloc[-1])
+        date = dt.date().isoformat()
+        if not pos(close):
+            return "unverified", date, "Invalid recent closing price"
+        if (now - dt.astimezone(timezone.utc)).days > 7:
+            return "stale", date, "Last traded price older than seven calendar days"
+        if "Stock Splits" in history.columns:
+            splits = history["Stock Splits"].fillna(0)
+            recent = [(d, v) for d, v in splits.items() if number(v) and float(v) != 0
+                      and 0 <= (now - (d.to_pydatetime().replace(tzinfo=timezone.utc) if d.tzinfo is None else d.to_pydatetime().astimezone(timezone.utc))).days <= 30]
+            if recent:
+                return "recent_split", date, "Split in last 30 days: per-share inputs need review"
+        if abs(quote_price / close - 1) > 0.15:
+            return "mismatch", date, "Quote differs from raw latest close by over 15%"
+        return "verified", date, ""
+    except (KeyError, TypeError, ValueError, AttributeError, OverflowError) as exc:
+        return "unverified", "", f"History validation error: {exc}"
+
+
+def debt_health(s: Stock) -> tuple[str, str]:
+    """Evidence-based financial health checks; unknown metrics are not evidence of safety."""
+    flags = []
+    evidence = 0
+    if is_lender(s):
+        return "Not comparable", "Bank/insurer ratios require sector-specific solvency checks"
+    if s.ebitda is not None and s.debt is not None and s.cash is not None:
+        evidence += 1
+        if s.ebitda <= 0 and s.debt > s.cash:
+            flags.append("Negative EBITDA with net debt")
+        elif s.ebitda > 0 and (s.debt - s.cash) / s.ebitda > 3.5:
+            flags.append("Net debt / EBITDA above 3.5x")
+    if s.debt_to_equity is not None:
+        evidence += 1
+        if s.debt_to_equity > 250:
+            flags.append("Debt/equity above 250%")
+    if s.current_ratio is not None:
+        evidence += 1
+        if s.current_ratio < 1:
+            flags.append("Current ratio below 1.0")
+    if s.interest_coverage is not None:
+        evidence += 1
+        if s.interest_coverage < 2:
+            flags.append("Interest coverage below 2x")
+    if flags:
+        return "Elevated risk", "; ".join(flags)
+    if evidence < 2:
+        return "Unknown", "Insufficient debt/liquidity metrics"
+    return "No red flags", ""
 
 
 def is_lender(s: Stock) -> bool:
@@ -255,10 +337,22 @@ def evaluate(s: Stock, pe_medians: dict[str, float], ev_medians: dict[str, float
         return None
     upside = (fair / s.price - 1) * 100
     spread = (max(kept.values()) - min(kept.values())) / fair * 100 if len(kept) > 1 else 0
+    health, health_flags = debt_health(s)
+    model_warning = "Model disagreement >50%" if spread > 50 else ""
+    tier = ("High confidence" if len(kept) >= 4 and spread <= 50 and
+            s.price_status == "verified" and health == "No red flags" else "Review only")
+    target = s.analyst_target if pos(s.analyst_target) else None
+    target_upside = round((target / s.price - 1) * 100, 2) if target else None
     return Evaluation(s.symbol, s.name, round(s.price, 4), round(fair, 4), round(upside, 2),
                       s.cap, s.sector, s.industry, s.currency, len(kept),
                       {k: round(v, 4) for k, v in kept.items()}, excluded,
-                      reverse_dcf(s), round(spread, 1), s.fetched_at)
+                      reverse_dcf(s), round(spread, 1), s.fetched_at,
+                      analyst_target=round(target, 4) if target else None,
+                      analyst_upside_pct=target_upside, analyst_count=s.analyst_count,
+                      target_source=s.target_source if target else "", confidence=tier,
+                      model_warning=model_warning, financial_health=health,
+                      health_flags=health_flags, price_status=s.price_status,
+                      price_date=s.price_date, price_flags=s.price_flags)
 
 
 def sector_medians(stocks: list[Stock]) -> tuple[dict[str, float], dict[str, float]]:
@@ -346,6 +440,20 @@ def fetch_stock(quote: dict) -> Stock | None:
             LOG.info("Skipping %s mismatched or non-USD currency %s/%s", symbol, ccy, finccy)
             return None
         shares = pos(info.get("sharesOutstanding")) or cap / price
+        try:
+            history = ticker.history(period="2mo", auto_adjust=False, actions=True)
+        except Exception as exc:
+            LOG.warning("Price history unavailable for %s: %s", symbol, exc)
+            history = None
+        price_status, price_date, price_flags = price_check(price, history)
+        if price_status in {"stale", "mismatch", "recent_split"}:
+            LOG.warning("Rejecting %s due to %s: %s", symbol, price_status, price_flags)
+            return None
+        analyst_count_raw = number(info.get("numberOfAnalystOpinions"))
+        analyst_count = int(analyst_count_raw) if analyst_count_raw and analyst_count_raw > 0 else None
+        analyst_target = pos(info.get("targetMeanPrice")) if analyst_count else None
+        if analyst_target and (analyst_target < price * 0.15 or analyst_target > price * 5):
+            analyst_target = None
         dy = number(info.get("dividendYield"))
         if dy is not None and (dy < 0 or dy > 1):
             dy = None
@@ -362,6 +470,12 @@ def fetch_stock(quote: dict) -> Stock | None:
             debt=number(info.get("totalDebt")), cash=number(info.get("totalCash")),
             bvps=number(info.get("bookValue")), roe=number(info.get("returnOnEquity")),
             dividend_yield=dy, buyback_yield=get_buyback_yield(ticker),
+            analyst_target=analyst_target, analyst_count=analyst_count,
+            target_source="Yahoo Finance / yfinance (reported analyst mean; usually ~12 months)" if analyst_target else "",
+            price_status=price_status, price_date=price_date, price_flags=price_flags,
+            current_ratio=number(info.get("currentRatio")),
+            debt_to_equity=number(info.get("debtToEquity")),
+            interest_coverage=number(info.get("interestCoverage")),
             fetched_at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     except Exception as e:
         LOG.warning("Could not fetch %s: %s", symbol, e)
