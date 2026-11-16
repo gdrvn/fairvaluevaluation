@@ -1,6 +1,6 @@
-# FairValue Scout — your six-model stock screening agent
+# FairValue Scout 2.0 — six-model stock screening agent
 
-**What it does:** Screens U.S.-listed equities with market capitalization above USD 10 billion, calculates a weighted fair-value estimate from up to **six appropriate valuation models**, filters for **15–60% implied upside**, and writes an easy-to-read HTML report and CSV. The standard GitHub Actions setup runs daily, and optionally emails the **top five every Saturday**.
+**What it does:** Screens U.S.-listed equities with market capitalization above USD 10 billion, calculates a weighted fair-value estimate from up to **six appropriate valuation models**, filters for **15–60% implied upside**, and lists **up to 50** ranked stocks in an industry-filterable HTML report and CSV, with published 12-month analyst consensus targets when available. The standard GitHub Actions setup runs daily, and optionally emails the **top five every Saturday**.
 
 This is a runnable **independent research prototype**, inspired by [ACCE Investments' publicly published method](https://www.acceinvestments.com/data/how-we-value-stocks), **not a copy of its source code, database, proprietary calibration or ratings**. Its price estimates may differ substantially. Fair-value gaps are not forecasts and do not justify trades by themselves.
 
@@ -34,7 +34,7 @@ python agent.py --limit 0
 python agent.py --tickers sample_tickers.csv
 ```
 
-For speed, use `--limit 200`. This is **not** a market-wide scan because it covers only the first 200 screener results, generally larger companies. The run report will tell you how many companies were screened. `--cache-hours 24` keeps a local copy of financial data for a day. The scan re-fetches a company's fundamentals only after its cache expires; it's not truly intraday live repricing. To force a fresh run, remove `.cache/`.
+For speed, use `--limit 500`. This is **not** a market-wide scan because it covers only the first 500 screener results, generally larger companies. The run report will tell you how many companies were screened. `--cache-hours 24` keeps a local copy of financial data for a day. The scan re-fetches a company's fundamentals only after its cache expires; it's not truly intraday live repricing. To force a fresh run, remove `.cache/`.
 
 ## Valuation models and safeguards
 
@@ -72,7 +72,7 @@ Rules applied to each company:
 
 1. Create a **private GitHub repository** and upload all files (including `.github/workflows/daily-screener.yml`). Do not upload passwords or `.env` files.
 2. Open your GitHub repository → **Actions** → `FairValue Scout daily valuation screen` → **Run workflow** for the first trial.
-3. The workflow automatically runs every day at **08:30 UTC**, screens up to **200** companies by default for resource safety, and uploads `report.html`, `candidates.csv`, etc. as a GitHub Actions artifact. Scheduled execution can be delayed or blocked by rate limiting.
+3. The workflow automatically runs every day at **08:30 UTC**, screens up to **500** companies by default for resource safety, and uploads `report.html`, `candidates.csv`, etc. as a GitHub Actions artifact. Scheduled execution can be delayed or blocked by rate limiting.
 4. Set `--limit 0` / change `RUN_LIMIT` to `0` in the workflow if you need the broad scan, accepting longer runtime and likely data-provider rate limits. For reliable high-volume work, replace Yahoo with a licensed market-data API.
 5. Optional Saturday email: in **Settings → Secrets and variables → Actions**, set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `REPORT_TO`, and `REPORT_FROM`. The script uses SMTP over SSL (commonly 465), **not your normal account password**. If secrets are absent, it writes the report instead of emailing it. The email contains the top-five plain-text list plus HTML table. Test with `python agent.py --limit 50 --email` after configuring secrets locally through environment variables.
 
@@ -94,3 +94,15 @@ The [yfinance project](https://github.com/ranaroussi/yfinance) says the Yahoo Fi
 ## Preview without market-data access
 
 Open `example/demo_report.html` to preview the output. It uses **entirely fictional companies and synthetic numbers** to illustrate the layout; it is not an actual investment shortlist.
+
+## Version 2.0 improvements
+
+- **Up to 50** ranked qualifying stocks in the report and CSV, screened from up to **500** companies in the daily workflow; if fewer than 50 qualify, fewer are shown. The broader option is `--limit 0`, subject to API coverage and rate limits. A sample of 500 is not the whole market.
+- **Sector and industry** columns for sorting/grouping the CSV, plus an industry filter on the HTML dashboard.
+- **12-month analyst consensus price target**, analyst count, analyst-implied upside and a source label are reported separately from the agent's model fair value. These use Yahoo Finance's aggregated `targetMeanPrice` and `numberOfAnalystOpinions` via yfinance, which are generally described as 12-month targets. Individual analyst dates cannot be verified in this feed. If missing, the dashboard prints N/A rather than fabricating a target.
+- **Price/split validation:** inspect recent raw close and corporate-action history; reject stale (>7 days), inconsistent (>15% close/quote difference) and recently split (last 30 days) securities until the per-share data are reconciled. When history is missing, a stock can appear only in the review tier, never high-confidence.
+- **High-confidence screening tier** requires >=4 surviving valuation models, <=50% model dispersion, a verified recent price, and enough debt/liquidity data without flagged risks. All other qualifying stocks are labelled Review only. The term describes agreement among these models, not certainty of returns.
+- **Model disagreement** above 50% is explicitly flagged. Basic financial-health checks flag net debt/EBITDA >3.5x, debt/equity >250%, current ratio <1, and interest coverage <2; missing metrics remain Unknown. Financial companies are labelled Not comparable and require sector-specific review.
+- **Tests run on every workflow execution** before the market-data scan; the daily schedule, manual trigger, report artifact, and optional Saturday SMTP email remain unchanged.
+
+The valuation model is a heuristic, not trading advice. See `reports/run_summary.json` for the actual number screened, matched and displayed. The generated HTML and CSV intentionally contain at most 50 candidates.
