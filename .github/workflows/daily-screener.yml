@@ -1,5 +1,9 @@
 name: FairValue Scout daily valuation screen
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/daily-screener.yml'
   schedule:
     - cron: '30 8 * * *' # Every day at 08:30 UTC; email only Saturdays
   workflow_dispatch:
