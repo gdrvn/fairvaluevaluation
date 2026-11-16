@@ -1,0 +1,10 @@
+SYNTHETIC — FOR DEMONSTRATION ONLY
+
+Top 5 US-listed stocks with estimated 15–60% value gap | 2026-11-16 13:10 UTC
+Scanned: 3; candidates: 3
+
+1. DEMOA — Fictional Manufacturing Co.: price $80.00; fair value $123.45; upside 54.3%; 4 models; dispersion 49%
+2. DEMOC — Imaginary Consumer Goods: price $75.00; fair value $115.39; upside 53.9%; 4 models; dispersion 40%
+3. DEMOB — Invented Energy Systems: price $90.00; fair value $123.18; upside 36.9%; 4 models; dispersion 27%
+
+Estimated valuation gaps, not price targets. Research only. Sources and model details in HTML report.

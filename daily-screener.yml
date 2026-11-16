@@ -1,0 +1,45 @@
+name: FairValue Scout daily valuation screen
+on:
+  schedule:
+    - cron: '30 8 * * *' # Every day at 08:30 UTC; email only Saturdays
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: 'Number of companies to scan (0 = all, resource intensive)'
+        required: false
+        default: '200'
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: read
+    env:
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      REPORT_TO: ${{ secrets.REPORT_TO }}
+      REPORT_FROM: ${{ secrets.REPORT_FROM }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - uses: actions/cache@v4
+        with:
+          path: .cache
+          key: fundamentals-${{ github.run_id }}
+          restore-keys: fundamentals-
+      - name: Run daily screen
+        env:
+          RUN_LIMIT: ${{ github.event.inputs.limit || '200' }}
+        run: python agent.py --limit "$RUN_LIMIT" --cache-hours 24 --scheduled
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fair-value-report-${{ github.run_number }}
+          path: reports/
+          if-no-files-found: warn

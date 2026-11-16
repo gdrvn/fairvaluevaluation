@@ -1,0 +1,2 @@
+# Optional list of YOUR existing open stock picks to suppress from suggestions.
+# One ticker per line, e.g. AAPL
