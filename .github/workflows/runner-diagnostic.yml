@@ -1,0 +1,26 @@
+name: FairValue Scout runner diagnostic
+
+on:
+  push:
+    paths:
+      - '.github/workflows/runner-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runner-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm GitHub runner started
+        run: |
+          echo "GitHub Actions runner started successfully"
+          date -u
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Run valuation unit tests (no network or secrets)
+        run: |
+          python3 --version
+          python3 -m unittest discover -s tests -p 'test_*.py' -v
