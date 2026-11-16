@@ -48,3 +48,5 @@ jobs:
           name: fair-value-report-${{ github.run_number }}
           path: reports/
           if-no-files-found: warn
+
+# Manual refresh requested 2026-11-16; configuration and valuation logic unchanged.
