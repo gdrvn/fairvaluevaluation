@@ -11,7 +11,7 @@ on:
       limit:
         description: 'Number of companies to scan (0 = all, resource intensive)'
         required: false
-        default: '200'
+        default: '500'
 jobs:
   evaluate:
     runs-on: ubuntu-latest
@@ -32,6 +32,7 @@ jobs:
           python-version: '3.11'
           cache: pip
       - run: pip install -r requirements.txt
+      - run: python -m unittest discover -s tests -v
       - uses: actions/cache@v4
         with:
           path: .cache
@@ -39,8 +40,8 @@ jobs:
           restore-keys: fundamentals-
       - name: Run daily screen
         env:
-          RUN_LIMIT: ${{ github.event.inputs.limit || '200' }}
-        run: python agent.py --limit "$RUN_LIMIT" --cache-hours 24 --scheduled
+          RUN_LIMIT: ${{ github.event.inputs.limit || '500' }}
+        run: python agent.py --limit "$RUN_LIMIT" --report-limit 50 --cache-hours 24 --scheduled
       - uses: actions/upload-artifact@v4
         if: always()
         with:
