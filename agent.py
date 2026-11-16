@@ -535,47 +535,62 @@ def money(v: float) -> str:
 
 
 def build_report(evaluations: list[Evaluation], inspected: int, fetched: int, all_evals: list[Evaluation]) -> tuple[str, str]:
+    """Industry-filterable, top-50 report with separate model and analyst targets."""
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    main = evaluations[:5]
-    heading = "Top 5 US-listed stocks with estimated 15–60% value gap"
+    displayed = evaluations[:50]
+    main = displayed[:5]
+    heading = "FairValue Scout 2.0 — Top 50 qualifying stocks"
+    industries = sorted({e.industry or "Unknown" for e in displayed})
+    choices = "".join(f'<option value="{html.escape(x, quote=True)}">{html.escape(x)}</option>' for x in industries)
     rows = []
-    for index, e in enumerate(evaluations, 1):
+    for index, e in enumerate(displayed, 1):
         details = "".join(f"<li><strong>{html.escape(k)}</strong>: {money(v)}</li>" for k, v in e.model_values.items())
         dropped = "".join(f"<li>{html.escape(k)} — {html.escape(v)}</li>" for k, v in e.excluded_models.items())
-        rows.append(f"""<tr><td>{index}</td><td><strong>{html.escape(e.symbol)}</strong><br>{html.escape(e.name)}</td>
-<td>{money(e.price)}</td><td>{money(e.fair_value)}</td><td class='positive'>{e.upside_pct:.1f}%</td>
-<td>{e.valid_models}/6</td><td>{e.dispersion_pct:.0f}%</td>
-<td><details><summary>Models & assumptions</summary><ul>{details}</ul><p>Reverse DCF: {html.escape(e.reverse_dcf)}</p>
-<p>Excluded:</p><ul>{dropped}</ul></details></td></tr>""")
-    body = "\n".join(rows) if rows else "<tr><td colspan='8'>No companies passed the screen with at least two valid models.</td></tr>"
-    html_doc = f"""<!doctype html><html lang='en'><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>FairValue Scout | {timestamp}</title><style>
-:root{{font-family:Inter,system-ui,-apple-system,sans-serif;color:#17263f;background:#f3f6fc}}
-body{{max-width:1250px;margin:35px auto;padding:0 18px}}h1{{font-size:31px;margin:10px 0}}p{{line-height:1.5}}
-header{{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}}.tag{{background:#e8f0ff;color:#2457d3;border-radius:20px;padding:7px 12px}}
-.card{{background:white;border:1px solid #dbe4f4;border-radius:18px;padding:24px;margin:20px 0;box-shadow:0 3px 18px #1b3b7508}}
-table{{border-collapse:collapse;width:100%;font-size:14px}}th,td{{padding:13px 9px;border-bottom:1px solid #e6edf7;text-align:left;vertical-align:top}}
-th{{color:#62718b;font-size:12px;text-transform:uppercase}}tr:nth-child(even){{background:#f9fbff}}.positive{{color:#137a57;font-weight:750}}
-details{{min-width:150px}}.note{{font-size:13px;color:#607086}}.scroll{{overflow-x:auto}}li{{margin:5px 0}}
-</style><body><header><div><span class='tag'>Independent research prototype</span><h1>{heading}</h1>
-<p>{timestamp} • Screened {inspected} listings • {fetched} new fundamentals requests • {len(all_evals)} evaluable • {len(evaluations)} qualified</p></div></header>
-<div class='card'><h2>Ranked by model-implied upside</h2><div class='scroll'><table><thead><tr>
-<th>#</th><th>Company</th><th>Price</th><th>Fair value</th><th>Implied upside</th><th>Valid models</th><th>Model range / fair value</th><th>Evidence</th>
-</tr></thead><tbody>{body}</tbody></table></div></div>
-<div class='card'><h2>Methodology</h2><p>US-listed equities, market cap above $10 billion, USD price and financial reporting, estimated fair value 15–60% above market price, at least two surviving valuation models. Six models are attempted when suitable: simplified 5-year equity free-cash-flow DCF (10.5% discount and 2.5% terminal growth), forward P/E peer median, EV/EBITDA peer median, Graham number, residual income for lenders, and shareholder yield. Reverse DCF is informational only. Outlier rules: remove values outside 0–3× price and below 0.4× or above 3× other-model median; weighted average of survivors. Sector peers are built from the fetched sample; no fabricated peer estimates.</p>
-<p class='note'>Fair value is not a time-specific price target. Yahoo data may be delayed, incomplete or erroneous. Financial figures are cached for up to the configured hours, so this is not a genuine tick-by-tick repricing service. Growth and discount-rate assumptions are simplified; this does not reproduce ACCE Investments' implementation. Large disagreement between models signals low confidence. Run full-universe scanning with an appropriately licensed data feed for commercial usage. No investment advice.</p>
-<p class='note'>Sources: <a href='https://www.acceinvestments.com/data/how-we-value-stocks'>ACCE published methodology</a>; <a href='https://ranaroussi.github.io/yfinance/'>yfinance data client (personal research terms)</a>.</p></div>
-</body></html>"""
-    plain = [f"{heading} | {timestamp}", f"Scanned: {inspected}; candidates: {len(evaluations)}", ""]
+        analyst = money(e.analyst_target) if e.analyst_target else "N/A"
+        analyst_gap = f"{e.analyst_upside_pct:+.1f}%" if e.analyst_upside_pct is not None else "N/A"
+        warning = html.escape(e.model_warning) if e.model_warning else ""
+        flags = html.escape(e.health_flags or e.price_flags)
+        rows.append(f'''<tr data-industry="{html.escape(e.industry or "Unknown", quote=True)}">
+<td>{index}</td><td><strong>{html.escape(e.symbol)}</strong><br>{html.escape(e.name)}</td>
+<td>{html.escape(e.sector or "Unknown")}</td><td>{html.escape(e.industry or "Unknown")}</td>
+<td>{money(e.price)}</td><td>{money(e.fair_value)}</td><td class="positive">{e.upside_pct:.1f}%</td>
+<td>{analyst}</td><td>{analyst_gap}</td><td>{e.analyst_count or "N/A"}</td>
+<td>{html.escape(e.confidence)}</td><td>{e.valid_models}/6</td><td>{e.dispersion_pct:.0f}% {warning}</td>
+<td>{html.escape(e.financial_health)}</td>
+<td><details><summary>Details</summary><p>Quote check: {html.escape(e.price_status)} ({html.escape(e.price_date)})</p>
+<p>{flags}</p><p>Analyst consensus source: {html.escape(e.target_source or "Unavailable")}</p>
+<ul>{details}</ul><p>Reverse DCF: {html.escape(e.reverse_dcf)}</p><ul>{dropped}</ul></details></td></tr>''')
+    body = "\n".join(rows) if rows else '<tr><td colspan="15">No stocks passed validation and valuation filters.</td></tr>'
+    page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FairValue Scout 2.0 | {timestamp}</title>
+<style>body{{font-family:system-ui,sans-serif;color:#17263f;background:#f3f6fc;margin:32px auto;max-width:1550px;padding:0 20px}}
+.card{{background:white;border:1px solid #dbe4f4;border-radius:16px;padding:22px;margin-top:20px}}
+table{{border-collapse:collapse;width:100%;font-size:13px}}th,td{{padding:11px 9px;border-bottom:1px solid #e6edf7;text-align:left;vertical-align:top}}
+th{{position:sticky;top:0;background:#e8f0ff;white-space:nowrap}}.scroll{{overflow:auto;max-height:78vh}}.positive{{color:#137a57;font-weight:700}}
+select{{padding:9px;border-radius:8px;border:1px solid #a7b4d1;max-width:100%}}li{{margin:5px 0}}.note{{color:#596b86;font-size:13px}}</style></head>
+<body><h1>{heading}</h1><p>{timestamp} • screened {inspected} • {fetched} fresh fundamentals requests • {len(all_evals)} evaluable • {len(evaluations)} qualifying • showing {len(displayed)}</p>
+<div class="card"><label for="industry">Group/filter by industry: </label>
+<select id="industry" onchange="filterIndustry()"><option value="">All industries</option>{choices}</select>
+<div class="scroll"><table><thead><tr><th>#</th><th>Stock</th><th>Sector</th><th>Industry</th><th>Price</th><th>Model fair value</th><th>Model upside</th><th>12M analyst consensus</th><th>Analyst upside</th><th># analysts</th><th>Confidence tier</th><th>Models</th><th>Dispersion</th><th>Debt/health</th><th>Detail</th></tr></thead>
+<tbody id="stocks">{body}</tbody></table></div></div>
+<div class="card"><h2>Method & caveats</h2><p>Up to 50 ranked stocks showing model-implied fair value 15–60% above price. "High confidence" requires at least four valid models, ≤50% dispersion, independently verified recent raw price and no available red flags on non-financial-company debt/liquidity. It is a screening evidence tier, not a buy recommendation. Other qualifying names are "Review only". Model dispersion over 50% is flagged.</p>
+<p>Analyst consensus = Yahoo Finance mean target (normally approximately 12-month horizon), shown only with an analyst count. It is not the model fair value, not a guarantee, and Yahoo does not provide an exact analyst-publication timestamp here. Missing targets are N/A. Financial ratios can be incomplete and risk flags aren't exhaustive. Quote/split checks reject stale history, >15% raw-close mismatch and recent splits; missing history excludes high-confidence classification.</p>
+<p class="note">Only the stocks fetched are screened; this is not the complete universe unless the universe download is exhaustive. Peer medians use covered peers. Data may be stale, delayed or erroneous. This prototype does not reproduce ACCE Investments' proprietary calibration. Not investment advice. Financial data via yfinance for personal research only.</p></div>
+<script>function filterIndustry(){{var v=document.getElementById('industry').value;document.querySelectorAll('#stocks tr[data-industry]').forEach(function(r){{r.hidden=!!v&&r.dataset.industry!==v}})}}</script></body></html>'''
+    plain = [f"{heading} | {timestamp}", f"Scanned {inspected} • qualifying {len(evaluations)} • listed {len(displayed)}", ""]
     for i, e in enumerate(main, 1):
-        plain.append(f"{i}. {e.symbol} — {e.name}: price {money(e.price)}; fair value {money(e.fair_value)}; upside {e.upside_pct:.1f}%; {e.valid_models} models; dispersion {e.dispersion_pct:.0f}%")
-    plain.append("\nEstimated valuation gaps, not price targets. Research only. Sources and model details in HTML report.")
-    return html_doc, "\n".join(plain)
+        target = money(e.analyst_target) if e.analyst_target else "N/A"
+        plain.append(f"{i}. {e.symbol} ({e.industry}) — price {money(e.price)}; model fair value {money(e.fair_value)}; 12m analyst target {target}; evidence {e.confidence}; dispersion {e.dispersion_pct:.0f}%")
+    plain.append("\nResearch screen only; fair value and analyst targets are not guaranteed future prices.")
+    return page, "\n".join(plain)
 
 
 def save_csv(results: list[Evaluation], path: Path) -> None:
-    fieldnames = ["symbol", "name", "price", "fair_value", "upside_pct", "cap", "sector", "industry",
-                  "currency", "valid_models", "dispersion_pct", "reverse_dcf", "fetched_at", "model_values", "excluded_models"]
+    fieldnames = ["symbol", "name", "sector", "industry", "price", "fair_value", "upside_pct",
+                  "analyst_target", "analyst_upside_pct", "analyst_count", "target_source",
+                  "confidence", "model_warning", "financial_health", "health_flags",
+                  "price_status", "price_date", "price_flags", "cap", "currency", "valid_models",
+                  "dispersion_pct", "reverse_dcf", "fetched_at", "model_values", "excluded_models"]
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
@@ -621,17 +636,19 @@ def run(args: argparse.Namespace) -> None:
     LOG.info("Sector P/E medians: %s; EV/EBITDA medians: %s", pe, ev)
     all_evaluations = [e for s in stocks if (e := evaluate(s, pe, ev))]
     results = [e for e in all_evaluations if 15 <= e.upside_pct <= 60]
-    results.sort(key=lambda e: (-e.upside_pct, e.dispersion_pct))
+    results.sort(key=lambda e: (e.confidence != "High confidence", -e.upside_pct, e.dispersion_pct))
+    displayed = results[:args.report_limit]
     out = Path(args.output)
     out.mkdir(exist_ok=True, parents=True)
-    page, mail_text = build_report(results, len(quotes), fetched, all_evaluations)
+    page, mail_text = build_report(displayed, len(quotes), fetched, all_evaluations)
     (out / "report.html").write_text(page, encoding="utf-8")
     (out / "weekly_email.txt").write_text(mail_text, encoding="utf-8")
     (out / "run_summary.json").write_text(json.dumps({
         "inspected": len(quotes), "available_financials": len(stocks), "evaluated": len(all_evaluations),
-        "matched": len(results), "top5": [asdict(e) for e in results[:5]],
+        "matched": len(results), "shown": len(displayed), "high_confidence": sum(e.confidence == "High confidence" for e in displayed),
+        "top5": [asdict(e) for e in displayed[:5]],
         "generated_utc": datetime.now(timezone.utc).isoformat()}, indent=2), encoding="utf-8")
-    save_csv(results, out / "candidates.csv")
+    save_csv(displayed, out / "candidates.csv")
     print(mail_text)
     print(f"\nFiles: {out / 'report.html'} | {out / 'candidates.csv'}")
     should_email = args.email or (args.scheduled and datetime.now(timezone.utc).weekday() == 5)
@@ -647,6 +664,8 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Rank $10B+ US-listed stocks by six-model fair-value gap")
     p.add_argument("--limit", type=int, default=0, help="Max names to fetch. 0 means full screener universe; 50 is a quick test")
     p.add_argument("--tickers", help="Optional CSV of tickers, one per row, for a custom watchlist")
+    p.add_argument("--report-limit", type=int, default=50, choices=range(1, 51), metavar="1-50",
+                   help="Show at most this many ranked candidates (default: 50)")
     p.add_argument("--exclude", default="exclude.txt", help="Tickers to exclude (one per line)")
     p.add_argument("--cache", default=".cache/fundamentals.json")
     p.add_argument("--cache-hours", type=int, default=24, help="Cached fundamentals lifetime (default 24h)")
